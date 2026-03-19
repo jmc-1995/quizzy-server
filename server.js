@@ -16,42 +16,33 @@ let rooms = {};
 
 io.on("connection", (socket) => {
 
-  console.log("Usuario conectado:", socket.id);
-
   // Crear sala
-  socket.on("createRoom", (hostName) => {
+  socket.on("createRoom", () => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
     rooms[roomId] = {
-      host: socket.id,
       players: [],
       questions: [],
-      currentQuestion: 0,
+      currentQuestion: -1,
       scores: {}
     };
 
     socket.join(roomId);
-
     socket.emit("roomCreated", roomId);
   });
 
-  // Unirse a sala
+  // Unirse
   socket.on("joinRoom", ({ roomId, name }) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
-
-    if (!room) {
-      socket.emit("errorMessage", "Sala no existe");
-      return;
-    }
+    if (!room) return;
 
     socket.join(roomId);
 
-    const player = { id: socket.id, name };
-    room.players.push(player);
+    room.players.push({ id: socket.id, name });
 
     room.scores[socket.id] = {
-      name: name,
+      name,
       points: 0
     };
 
@@ -73,8 +64,36 @@ io.on("connection", (socket) => {
     const room = rooms[roomId];
     if (!room) return;
 
-    room.currentQuestion = 0;
-    sendQuestion(roomId);
+    room.currentQuestion = -1;
+  });
+
+  // 🔥 Siguiente pregunta (control manual)
+  socket.on("nextQuestion", (roomId) => {
+    roomId = roomId.trim();
+    const room = rooms[roomId];
+    if (!room) return;
+
+    room.currentQuestion++;
+
+    if (room.currentQuestion >= room.questions.length) {
+      const ranking = Object.values(room.scores)
+        .sort((a, b) => b.points - a.points);
+
+      io.to(roomId).emit("gameOver", ranking);
+      return;
+    }
+
+    const q = room.questions[room.currentQuestion];
+
+    // 🔥 Mezclar opciones
+    const opciones = [...q.opciones].sort(() => Math.random() - 0.5);
+
+    io.to(roomId).emit("newQuestion", {
+      pregunta: q.pregunta,
+      opciones: opciones,
+      correcta: q.correcta,
+      tiempo: q.tiempo
+    });
   });
 
   // Responder
@@ -85,42 +104,10 @@ io.on("connection", (socket) => {
 
     const q = room.questions[room.currentQuestion];
 
-    if (q && answer === q.correcta) {
+    if (answer === q.correcta) {
       room.scores[socket.id].points += 1000 - (time * 50);
     }
   });
-
-  function sendQuestion(roomId) {
-    const room = rooms[roomId];
-    if (!room) return;
-
-    const q = room.questions[room.currentQuestion];
-    if (!q) return;
-
-    io.to(roomId).emit("newQuestion", q);
-
-    const tiempo = q.tiempo || 10000;
-
-    setTimeout(() => {
-      room.currentQuestion++;
-
-      if (room.currentQuestion < room.questions.length) {
-        sendQuestion(roomId);
-      } else {
-        endGame(roomId);
-      }
-    }, tiempo);
-  }
-
-  function endGame(roomId) {
-    const room = rooms[roomId];
-    if (!room) return;
-
-    const ranking = Object.values(room.scores)
-      .sort((a, b) => b.points - a.points);
-
-    io.to(roomId).emit("gameOver", ranking);
-  }
 
 });
 
