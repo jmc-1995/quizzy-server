@@ -6,6 +6,11 @@ const cors = require("cors");
 const app = express();
 app.use(cors());
 
+// 🔥 Ruta básica para evitar "Cannot GET /"
+app.get("/", (req, res) => {
+  res.send("Quizzy server funcionando ✅");
+});
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -15,6 +20,7 @@ const io = new Server(server, {
 let rooms = {};
 
 io.on("connection", (socket) => {
+  console.log("Cliente conectado:", socket.id);
 
   // Crear sala
   socket.on("createRoom", () => {
@@ -35,7 +41,10 @@ io.on("connection", (socket) => {
   socket.on("joinRoom", ({ roomId, name }) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
-    if (!room) return;
+    if (!room) {
+      socket.emit("errorMessage", "Sala no existe");
+      return;
+    }
 
     socket.join(roomId);
 
@@ -67,7 +76,7 @@ io.on("connection", (socket) => {
     room.currentQuestion = -1;
   });
 
-  // 🔥 Siguiente pregunta (control manual)
+  // Siguiente pregunta (manual)
   socket.on("nextQuestion", (roomId) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
@@ -85,7 +94,7 @@ io.on("connection", (socket) => {
 
     const q = room.questions[room.currentQuestion];
 
-    // 🔥 Mezclar opciones
+    // Mezclar opciones
     const opciones = [...q.opciones].sort(() => Math.random() - 0.5);
 
     io.to(roomId).emit("newQuestion", {
