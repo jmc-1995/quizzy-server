@@ -16,8 +16,12 @@ let rooms = {};
 
 io.on("connection", (socket) => {
 
+  console.log("Usuario conectado:", socket.id);
+
+  // 🔹 Crear sala
   socket.on("createRoom", (hostName) => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+
     rooms[roomId] = {
       host: socket.id,
       players: [],
@@ -25,62 +29,119 @@ io.on("connection", (socket) => {
       currentQuestion: 0,
       scores: {}
     };
+
     socket.join(roomId);
+
     console.log("Sala creada:", roomId);
+
     socket.emit("roomCreated", roomId);
   });
 
+  // 🔹 Unirse a sala
   socket.on("joinRoom", ({ roomId, name }) => {
-    const room = rooms[roomId.trim()];
+    roomId = roomId.trim();
+    const room = rooms[roomId];
+
     if (!room) {
       socket.emit("errorMessage", "Sala no existe");
       return;
     }
 
-    socket.join(roomId.trim());
+    socket.join(roomId);
+
     const player = { id: socket.id, name: name };
     room.players.push(player);
-    room.scores[socket.id] = 0;
+
+    // 🔥 Guardar nombre + puntos
+    room.scores[socket.id] = {
+      name: name,
+      points: 0
+    };
 
     console.log("Jugador unido:", name, "a sala", roomId);
 
-    io.to(roomId.trim()).emit("playersUpdate", room.players);
+    io.to(roomId).emit("playersUpdate", room.players);
   });
 
+  // 🔹 Agregar preguntas
   socket.on("addQuestion", ({ roomId, question }) => {
-    rooms[roomId.trim()].questions.push(question);
+    roomId = roomId.trim();
+    const room = rooms[roomId];
+    if (!room) return;
+
+    room.questions.push(question);
+
+    console.log("Pregunta agregada. Total:", room.questions.length);
   });
 
+  // 🔹 Iniciar juego
   socket.on("startGame", (roomId) => {
-    sendQuestion(roomId.trim());
+    roomId = roomId.trim();
+    const room = rooms[roomId];
+    if (!room) return;
+
+    // 🔥 RESET
+    room.currentQuestion = 0;
+
+    console.log("Juego iniciado en sala", roomId);
+
+    sendQuestion(roomId);
   });
 
+  // 🔹 Respuestas
   socket.on("answer", ({ roomId, answer, time }) => {
-    let room = rooms[roomId.trim()];
-    let q = room.questions[room.currentQuestion];
-    if (answer === q.correct) {
-      room.scores[socket.id] += 1000 - time;
+    roomId = roomId.trim();
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const q = room.questions[room.currentQuestion];
+
+    if (q && answer === q.correcta) {
+      room.scores[socket.id].points += 1000 - time;
     }
   });
 
+  // 🔹 Enviar preguntas
   function sendQuestion(roomId) {
-    let room = rooms[roomId];
-    let q = room.questions[room.currentQuestion];
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const q = room.questions[room.currentQuestion];
+
+    if (!q) return;
+
+    console.log("Enviando pregunta:", q.pregunta);
+
     io.to(roomId).emit("newQuestion", q);
 
     setTimeout(() => {
       room.currentQuestion++;
+
       if (room.currentQuestion < room.questions.length) {
         sendQuestion(roomId);
       } else {
-        io.to(roomId).emit("gameOver", room.scores);
+        endGame(roomId);
       }
-    }, 10000);
+    }, 10000); // 10 segundos por pregunta
   }
 
-}); // <--- FIN DEL io.on("connection")
+  // 🔹 Final del juego
+  function endGame(roomId) {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const ranking = Object.values(room.scores)
+      .sort((a, b) => b.points - a.points);
+
+    console.log("Juego terminado:", ranking);
+
+    io.to(roomId).emit("gameOver", ranking);
+  }
+
+});
 
 const PORT = process.env.PORT || 3000;
+
 server.listen(PORT, () => {
   console.log("Servidor corriendo en puerto", PORT);
 });
