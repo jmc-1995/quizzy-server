@@ -30,6 +30,10 @@ io.on("connection", (socket) => {
 socket.on("joinRoom", ({ roomId, name }) => {
   const room = rooms[roomId];
 
+socket.on("joinRoom", (data) => {
+  console.log("JOIN recibido:", data);
+});
+  
   if (!room) {
     socket.emit("errorMessage", "Sala no existe");
     return;
