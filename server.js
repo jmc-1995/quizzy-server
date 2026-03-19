@@ -6,7 +6,6 @@ const cors = require("cors");
 const app = express();
 app.use(cors());
 
-// 🔥 Ruta básica para evitar "Cannot GET /"
 app.get("/", (req, res) => {
   res.send("Quizzy server funcionando ✅");
 });
@@ -20,9 +19,9 @@ const io = new Server(server, {
 let rooms = {};
 
 io.on("connection", (socket) => {
+
   console.log("Cliente conectado:", socket.id);
 
-  // Crear sala
   socket.on("createRoom", () => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -30,21 +29,18 @@ io.on("connection", (socket) => {
       players: [],
       questions: [],
       currentQuestion: -1,
-      scores: {}
+      scores: {},
+      answered: 0
     };
 
     socket.join(roomId);
     socket.emit("roomCreated", roomId);
   });
 
-  // Unirse
   socket.on("joinRoom", ({ roomId, name }) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
-    if (!room) {
-      socket.emit("errorMessage", "Sala no existe");
-      return;
-    }
+    if (!room) return;
 
     socket.join(roomId);
 
@@ -58,16 +54,17 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("playersUpdate", room.players);
   });
 
-  // Agregar pregunta
   socket.on("addQuestion", ({ roomId, question }) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
     if (!room) return;
 
     room.questions.push(question);
+
+    // 🔥 CONFIRMACIÓN AL HOST
+    socket.emit("questionAdded", room.questions.length);
   });
 
-  // Iniciar juego
   socket.on("startGame", (roomId) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
@@ -76,13 +73,13 @@ io.on("connection", (socket) => {
     room.currentQuestion = -1;
   });
 
-  // Siguiente pregunta (manual)
   socket.on("nextQuestion", (roomId) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
     if (!room) return;
 
     room.currentQuestion++;
+    room.answered = 0;
 
     if (room.currentQuestion >= room.questions.length) {
       const ranking = Object.values(room.scores)
@@ -93,19 +90,16 @@ io.on("connection", (socket) => {
     }
 
     const q = room.questions[room.currentQuestion];
-
-    // Mezclar opciones
     const opciones = [...q.opciones].sort(() => Math.random() - 0.5);
 
     io.to(roomId).emit("newQuestion", {
       pregunta: q.pregunta,
-      opciones: opciones,
+      opciones,
       correcta: q.correcta,
       tiempo: q.tiempo
     });
   });
 
-  // Responder
   socket.on("answer", ({ roomId, answer, time }) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
@@ -115,6 +109,16 @@ io.on("connection", (socket) => {
 
     if (answer === q.correcta) {
       room.scores[socket.id].points += 1000 - (time * 50);
+    }
+
+    room.answered++;
+
+    // 🔥 Cuando todos responden → mostrar ranking
+    if (room.answered >= room.players.length) {
+      const ranking = Object.values(room.scores)
+        .sort((a, b) => b.points - a.points);
+
+      io.to(roomId).emit("showRanking", ranking);
     }
   });
 
