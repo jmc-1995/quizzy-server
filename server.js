@@ -27,10 +27,28 @@ io.on("connection", (socket) => {
       currentQuestion: 0,
       scores: {}
     };
+socket.on("joinRoom", ({ roomId, name }) => {
+  const room = rooms[roomId];
 
-    socket.join(roomId);
-    socket.emit("roomCreated", roomId);
-  });
+  if (!room) {
+    socket.emit("errorMessage", "Sala no existe");
+    return;
+  }
+
+  socket.join(roomId);
+
+  const player = {
+    id: socket.id,
+    name: name
+  };
+
+  room.players.push(player);
+  room.scores[socket.id] = 0;
+
+  console.log("Jugador unido:", name, "a sala", roomId);
+
+  io.to(roomId).emit("playersUpdate", room.players);
+});
 });
 
 server.listen(3000, () => {
