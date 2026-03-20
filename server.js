@@ -22,6 +22,7 @@ io.on("connection", (socket) => {
 
   console.log("Cliente conectado:", socket.id);
 
+  // Crear sala
   socket.on("createRoom", () => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -33,13 +34,16 @@ io.on("connection", (socket) => {
     };
 
     socket.join(roomId);
-
     socket.emit("roomCreated", roomId);
   });
 
-  socket.on("joinRoom", ({ roomId, name }) => {
-    roomId = roomId.trim();
+  // Unirse
+  socket.on("joinRoom", (data) => {
+    const roomId = data.roomId.trim();
+    const name = data.name;
+
     const room = rooms[roomId];
+
     if (!room) {
       socket.emit("errorMessage", "Sala no existe");
       return;
@@ -47,25 +51,30 @@ io.on("connection", (socket) => {
 
     socket.join(roomId);
 
-    room.players.push({ id: socket.id, name });
+    room.players.push({
+      id: socket.id,
+      name: name
+    });
 
     room.scores[socket.id] = {
-      name,
+      name: name,
       points: 0
     };
 
-    // 🔥 IMPORTANTE: enviar jugadores
     io.to(roomId).emit("playersUpdate", room.players);
   });
 
-  socket.on("addQuestion", ({ roomId, question }) => {
-    const room = rooms[roomId.trim()];
+  // Agregar pregunta
+  socket.on("addQuestion", (data) => {
+    const room = rooms[data.roomId.trim()];
     if (!room) return;
 
-    room.questions.push(question);
+    room.questions.push(data.question);
+
     socket.emit("questionAdded", room.questions.length);
   });
 
+  // Iniciar juego
   socket.on("startGame", (roomId) => {
     const room = rooms[roomId.trim()];
     if (!room) return;
@@ -73,6 +82,7 @@ io.on("connection", (socket) => {
     room.currentQuestion = -1;
   });
 
+  // Siguiente pregunta
   socket.on("nextQuestion", (roomId) => {
     const room = rooms[roomId.trim()];
     if (!room) return;
@@ -80,6 +90,7 @@ io.on("connection", (socket) => {
     room.currentQuestion++;
 
     if (room.currentQuestion >= room.questions.length) {
+
       const ranking = Object.values(room.scores)
         .sort((a, b) => b.points - a.points);
 
@@ -88,27 +99,30 @@ io.on("connection", (socket) => {
     }
 
     const q = room.questions[room.currentQuestion];
-    const opciones = [...q.opciones].sort(() => Math.random() - 0.5);
+
+    const opciones = q.opciones.sort(() => Math.random() - 0.5);
 
     io.to(roomId).emit("newQuestion", {
       pregunta: q.pregunta,
-      opciones,
+      opciones: opciones,
       correcta: q.correcta,
       tiempo: q.tiempo
     });
   });
 
-  socket.on("answer", ({ roomId, answer, time }) => {
-    const room = rooms[roomId.trim()];
+  // Responder
+  socket.on("answer", (data) => {
+    const room = rooms[data.roomId.trim()];
     if (!room) return;
 
     const q = room.questions[room.currentQuestion];
 
-    if (answer === q.correcta) {
-      room.scores[socket.id].points += 1000 - (time * 50);
+    if (q && data.answer === q.correcta) {
+      room.scores[socket.id].points += 1000 - (data.time * 50);
     }
   });
 
+  // Mostrar resultados
   socket.on("showResults", (roomId) => {
     const room = rooms[roomId.trim()];
     if (!room) return;
@@ -119,4 +133,15 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("showRanking", ranking);
   });
 
+  // Desconexión (evita errores)
+  socket.on("disconnect", () => {
+    console.log("Cliente desconectado:", socket.id);
+  });
+
+});
+
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+  console.log("Servidor corriendo en puerto", PORT);
 });
