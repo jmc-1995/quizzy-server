@@ -33,13 +33,17 @@ io.on("connection", (socket) => {
     };
 
     socket.join(roomId);
+
     socket.emit("roomCreated", roomId);
   });
 
   socket.on("joinRoom", ({ roomId, name }) => {
     roomId = roomId.trim();
     const room = rooms[roomId];
-    if (!room) return;
+    if (!room) {
+      socket.emit("errorMessage", "Sala no existe");
+      return;
+    }
 
     socket.join(roomId);
 
@@ -50,6 +54,7 @@ io.on("connection", (socket) => {
       points: 0
     };
 
+    // 🔥 IMPORTANTE: enviar jugadores
     io.to(roomId).emit("playersUpdate", room.players);
   });
 
@@ -68,7 +73,6 @@ io.on("connection", (socket) => {
     room.currentQuestion = -1;
   });
 
-  // 🔹 Siguiente pregunta
   socket.on("nextQuestion", (roomId) => {
     const room = rooms[roomId.trim()];
     if (!room) return;
@@ -94,7 +98,6 @@ io.on("connection", (socket) => {
     });
   });
 
-  // 🔹 Responder (NO muestra ranking)
   socket.on("answer", ({ roomId, answer, time }) => {
     const room = rooms[roomId.trim()];
     if (!room) return;
@@ -106,7 +109,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 🔥 NUEVO: Mostrar resultados manual
   socket.on("showResults", (roomId) => {
     const room = rooms[roomId.trim()];
     if (!room) return;
@@ -117,10 +119,4 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("showRanking", ranking);
   });
 
-});
-
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, () => {
-  console.log("Servidor corriendo en puerto", PORT);
 });
