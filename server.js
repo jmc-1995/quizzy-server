@@ -29,8 +29,7 @@ io.on("connection", (socket) => {
       players: [],
       questions: [],
       currentQuestion: -1,
-      scores: {},
-      answered: 0
+      scores: {}
     };
 
     socket.join(roomId);
@@ -55,31 +54,26 @@ io.on("connection", (socket) => {
   });
 
   socket.on("addQuestion", ({ roomId, question }) => {
-    roomId = roomId.trim();
-    const room = rooms[roomId];
+    const room = rooms[roomId.trim()];
     if (!room) return;
 
     room.questions.push(question);
-
-    // 🔥 CONFIRMACIÓN AL HOST
     socket.emit("questionAdded", room.questions.length);
   });
 
   socket.on("startGame", (roomId) => {
-    roomId = roomId.trim();
-    const room = rooms[roomId];
+    const room = rooms[roomId.trim()];
     if (!room) return;
 
     room.currentQuestion = -1;
   });
 
+  // 🔹 Siguiente pregunta
   socket.on("nextQuestion", (roomId) => {
-    roomId = roomId.trim();
-    const room = rooms[roomId];
+    const room = rooms[roomId.trim()];
     if (!room) return;
 
     room.currentQuestion++;
-    room.answered = 0;
 
     if (room.currentQuestion >= room.questions.length) {
       const ranking = Object.values(room.scores)
@@ -100,9 +94,9 @@ io.on("connection", (socket) => {
     });
   });
 
+  // 🔹 Responder (NO muestra ranking)
   socket.on("answer", ({ roomId, answer, time }) => {
-    roomId = roomId.trim();
-    const room = rooms[roomId];
+    const room = rooms[roomId.trim()];
     if (!room) return;
 
     const q = room.questions[room.currentQuestion];
@@ -110,16 +104,17 @@ io.on("connection", (socket) => {
     if (answer === q.correcta) {
       room.scores[socket.id].points += 1000 - (time * 50);
     }
+  });
 
-    room.answered++;
+  // 🔥 NUEVO: Mostrar resultados manual
+  socket.on("showResults", (roomId) => {
+    const room = rooms[roomId.trim()];
+    if (!room) return;
 
-    // 🔥 Cuando todos responden → mostrar ranking
-    if (room.answered >= room.players.length) {
-      const ranking = Object.values(room.scores)
-        .sort((a, b) => b.points - a.points);
+    const ranking = Object.values(room.scores)
+      .sort((a, b) => b.points - a.points);
 
-      io.to(roomId).emit("showRanking", ranking);
-    }
+    io.to(roomId).emit("showRanking", ranking);
   });
 
 });
