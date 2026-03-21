@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const fs = require("fs");
 
 const app = express();
 app.use(cors());
@@ -18,13 +19,27 @@ const io = new Server(server, {
 
 let rooms = {};
 
+// 🔥 ARCHIVO JSON
+function cargarSalas(){
+  try{
+    return JSON.parse(fs.readFileSync("salas.json"));
+  }catch{
+    return {};
+  }
+}
+
+function guardarSalas(data){
+  fs.writeFileSync("salas.json", JSON.stringify(data,null,2));
+}
+
 io.on("connection", (socket) => {
 
+  // CREAR SALA
   socket.on("createRoom", () => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
     rooms[roomId] = {
-      players: {},   // 🔥 ahora es objeto por nombre
+      players: {},
       questions: [],
       currentQuestion: -1,
       scores: {},
@@ -35,9 +50,8 @@ io.on("connection", (socket) => {
     socket.emit("roomCreated", roomId);
   });
 
+  // UNIRSE
   socket.on("joinRoom", (data) => {
-
-    if (!data || !data.roomId) return;
 
     const roomId = data.roomId.trim();
     let name = (data.name || "").trim();
@@ -45,49 +59,35 @@ io.on("connection", (socket) => {
     const room = rooms[roomId];
     if (!room) return;
 
-    if (!name) {
-      name = "Jugador_" + Math.floor(Math.random()*1000);
-    }
+    if (!name) name = "Jugador_" + Math.floor(Math.random()*1000);
 
     socket.join(roomId);
-
     socket.data.name = name;
-    socket.data.roomId = roomId;
 
-    // 🔥 CLAVE: guardar por nombre (NO socket.id)
     if (name !== "Pantalla") {
-
-      room.players[name] = {
-        name: name
-      };
+      room.players[name] = { name };
 
       if (!room.scores[name]) {
-        room.scores[name] = {
-          name: name,
-          points: 0
-        };
+        room.scores[name] = { name, points: 0 };
       }
     }
 
-    // 🔥 SIEMPRE enviar limpio
-    const playersArray = Object.values(room.players);
-
-    console.log("PLAYERS LIMPIOS:", playersArray);
-
+    io.to(roomId).emit("playersUpdate", Object.values(room.players));
     socket.emit("joinedRoom", roomId);
-    io.to(roomId).emit("playersUpdate", playersArray);
   });
 
+  // AGREGAR PREGUNTA
   socket.on("addQuestion", (data) => {
-    const room = rooms[data.roomId.trim()];
+    const room = rooms[data.roomId];
     if (!room) return;
 
     room.questions.push(data.question);
     socket.emit("questionAdded", room.questions.length);
   });
 
+  // SIGUIENTE PREGUNTA
   socket.on("nextQuestion", (roomId) => {
-    const room = rooms[roomId.trim()];
+    const room = rooms[roomId];
     if (!room) return;
 
     room.currentQuestion++;
@@ -112,8 +112,9 @@ io.on("connection", (socket) => {
     });
   });
 
+  // RESPUESTA
   socket.on("answer", (data) => {
-    const room = rooms[data.roomId.trim()];
+    const room = rooms[data.roomId];
     if (!room || !room.active) return;
 
     const now = Date.now();
@@ -123,7 +124,7 @@ io.on("connection", (socket) => {
     const tiempoRestante = Math.floor((room.endTime - now) / 1000);
 
     const name = socket.data.name;
-    if (!name || !room.scores[name]) return;
+    if (!room.scores[name]) return;
 
     if (data.answer === q.correcta) {
       room.scores[name].points += 5 + (tiempoRestante * 2);
@@ -132,11 +133,8 @@ io.on("connection", (socket) => {
     }
   });
 
+  // MOSTRAR RESULTADOS
   socket.on("showResults", (roomId) => {
-    const room = rooms[roomId.trim()];
-    if (!room) return;
-
-    room.active = false;
     enviarRanking(roomId);
   });
 
@@ -149,6 +147,57 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("showRanking", ranking);
   }
+
+  // 💾 GUARDAR SALA
+  socket.on("saveRoom",(data)=>{
+
+    const { roomId, nombre, password } = data;
+    const room = rooms[roomId];
+    if(!room) return;
+
+    let db = cargarSalas();
+
+    db[nombre] = {
+      password,
+      questions: room.questions
+    };
+
+    guardarSalas(db);
+
+    socket.emit("roomSaved","✅ Sala guardada");
+  });
+
+  // 📂 CARGAR SALA
+  socket.on("loadRoom",(data)=>{
+
+    const { nombre, password } = data;
+    let db = cargarSalas();
+
+    const sala = db[nombre];
+
+    if(!sala){
+      socket.emit("errorLoad","❌ No existe");
+      return;
+    }
+
+    if(sala.password !== password){
+      socket.emit("errorLoad","❌ Contraseña incorrecta");
+      return;
+    }
+
+    const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+
+    rooms[roomId] = {
+      players: {},
+      questions: sala.questions,
+      currentQuestion: -1,
+      scores: {},
+      active: false
+    };
+
+    socket.join(roomId);
+    socket.emit("roomLoaded", roomId);
+  });
 
 });
 
