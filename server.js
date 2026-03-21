@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const { MongoClient } = require("mongodb");
 
 const app = express();
 app.use(cors());
@@ -16,13 +17,31 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
+// 🔥 TU MONGODB
+const uri = "mongodb+srv://quizzy:Jhon1995@quizzy.ll9ykix.mongodb.net/?retryWrites=true&w=majority";
+
+const client = new MongoClient(uri);
+let db;
+
+// 🔥 CONEXIÓN
+async function conectarDB(){
+  try{
+    await client.connect();
+    db = client.db("quizzy");
+    console.log("🔥 MongoDB conectado");
+  }catch(e){
+    console.log("❌ Error Mongo:", e);
+  }
+}
+conectarDB();
+
 let rooms = {};
-let savedRooms = {}; // 🔥 almacenamiento temporal
 
 io.on("connection", (socket) => {
 
-  // 🔥 CREAR SALA
+  // 🎮 CREAR SALA
   socket.on("createRoom", () => {
+
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
     rooms[roomId] = {
@@ -37,7 +56,7 @@ io.on("connection", (socket) => {
     socket.emit("roomCreated", roomId);
   });
 
-  // 🔥 UNIRSE
+  // 👤 UNIRSE
   socket.on("joinRoom", (data) => {
 
     const roomId = data.roomId.trim();
@@ -52,6 +71,7 @@ io.on("connection", (socket) => {
     socket.data.name = name;
 
     if (name !== "Pantalla") {
+
       room.players[name] = { name };
 
       if (!room.scores[name]) {
@@ -63,8 +83,9 @@ io.on("connection", (socket) => {
     socket.emit("joinedRoom", roomId);
   });
 
-  // 🔥 AGREGAR PREGUNTA
+  // ➕ AGREGAR PREGUNTA
   socket.on("addQuestion", (data) => {
+
     const room = rooms[data.roomId];
     if (!room) return;
 
@@ -73,8 +94,9 @@ io.on("connection", (socket) => {
     socket.emit("questionAdded", room.questions.length);
   });
 
-  // 🔥 SIGUIENTE
+  // ➡️ SIGUIENTE
   socket.on("nextQuestion", (roomId) => {
+
     const room = rooms[roomId];
     if (!room) return;
 
@@ -100,8 +122,9 @@ io.on("connection", (socket) => {
     });
   });
 
-  // 🔥 RESPUESTA
+  // 🎯 RESPUESTA
   socket.on("answer", (data) => {
+
     const room = rooms[data.roomId];
     if (!room || !room.active) return;
 
@@ -121,12 +144,13 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 🔥 RESULTADOS
+  // 📊 RESULTADOS
   socket.on("showResults", (roomId) => {
     enviarRanking(roomId);
   });
 
   function enviarRanking(roomId){
+
     const room = rooms[roomId];
     if (!room) return;
 
@@ -136,8 +160,8 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("showRanking", ranking);
   }
 
-  // 💾 GUARDAR SALA
-  socket.on("saveRoom",(data)=>{
+  // 💾 GUARDAR EN MONGO
+  socket.on("saveRoom", async (data)=>{
 
     const { roomId, nombre, password } = data;
     const room = rooms[roomId];
@@ -148,48 +172,66 @@ io.on("connection", (socket) => {
     }
 
     if(!nombre || !password){
-      socket.emit("roomSaved","❌ Nombre o contraseña vacíos");
+      socket.emit("roomSaved","❌ Datos incompletos");
       return;
     }
 
-    savedRooms[nombre] = {
-      password,
-      questions: room.questions
-    };
+    try{
+      await db.collection("salas").updateOne(
+        { nombre },
+        {
+          $set:{
+            nombre,
+            password,
+            questions: room.questions
+          }
+        },
+        { upsert:true }
+      );
 
-    socket.emit("roomSaved","✅ Sala guardada correctamente");
+      socket.emit("roomSaved","💾 Sala guardada permanentemente");
+
+    }catch(e){
+      socket.emit("roomSaved","❌ Error al guardar");
+    }
   });
 
-  // 📂 CARGAR SALA
-  socket.on("loadRoom",(data)=>{
+  // 📂 CARGAR DESDE MONGO
+  socket.on("loadRoom", async (data)=>{
 
     const { nombre, password } = data;
 
-    const sala = savedRooms[nombre];
+    try{
 
-    if(!sala){
-      socket.emit("errorLoad","❌ No existe");
-      return;
+      const sala = await db.collection("salas").findOne({ nombre });
+
+      if(!sala){
+        socket.emit("errorLoad","❌ Sala no existe");
+        return;
+      }
+
+      if(sala.password !== password){
+        socket.emit("errorLoad","❌ Contraseña incorrecta");
+        return;
+      }
+
+      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+
+      rooms[roomId] = {
+        players: {},
+        questions: sala.questions,
+        currentQuestion: -1,
+        scores: {},
+        active: false
+      };
+
+      socket.join(roomId);
+
+      socket.emit("roomLoaded", roomId);
+
+    }catch(e){
+      socket.emit("errorLoad","❌ Error al cargar");
     }
-
-    if(sala.password !== password){
-      socket.emit("errorLoad","❌ Contraseña incorrecta");
-      return;
-    }
-
-    const roomId = Math.floor(1000 + Math.random() * 9000).toString();
-
-    rooms[roomId] = {
-      players: {},
-      questions: sala.questions,
-      currentQuestion: -1,
-      scores: {},
-      active: false
-    };
-
-    socket.join(roomId);
-
-    socket.emit("roomLoaded", roomId);
   });
 
 });
