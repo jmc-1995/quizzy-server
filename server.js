@@ -17,7 +17,6 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-// 🔥 TU MONGO
 const uri = "mongodb+srv://quizzy:Jhon1995@quizzy.ll9ykix.mongodb.net/?retryWrites=true&w=majority";
 
 const client = new MongoClient(uri);
@@ -25,18 +24,16 @@ const client = new MongoClient(uri);
 let db;
 let rooms = {};
 
-// 🔥 INICIAR TODO SOLO CUANDO MONGO CONECTE
-async function iniciarServidor(){
+async function iniciar(){
 
   try{
     await client.connect();
     db = client.db("quizzy");
 
-    console.log("🔥 MongoDB conectado correctamente");
+    console.log("🔥 Mongo conectado");
 
     io.on("connection", (socket) => {
 
-      // 🎮 CREAR SALA
       socket.on("createRoom", () => {
 
         const roomId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -53,7 +50,6 @@ async function iniciarServidor(){
         socket.emit("roomCreated", roomId);
       });
 
-      // 👤 UNIRSE
       socket.on("joinRoom", (data) => {
 
         const roomId = data.roomId.trim();
@@ -79,9 +75,7 @@ async function iniciarServidor(){
         socket.emit("joinedRoom", roomId);
       });
 
-      // ➕ AGREGAR PREGUNTA
       socket.on("addQuestion", (data) => {
-
         const room = rooms[data.roomId];
         if (!room) return;
 
@@ -89,7 +83,6 @@ async function iniciarServidor(){
         socket.emit("questionAdded", room.questions.length);
       });
 
-      // ➡️ SIGUIENTE
       socket.on("nextQuestion", (roomId) => {
 
         const room = rooms[roomId];
@@ -117,7 +110,6 @@ async function iniciarServidor(){
         });
       });
 
-      // 🎯 RESPUESTA
       socket.on("answer", (data) => {
 
         const room = rooms[data.roomId];
@@ -139,7 +131,6 @@ async function iniciarServidor(){
         }
       });
 
-      // 📊 RESULTADOS
       socket.on("showResults", (roomId) => {
         enviarRanking(roomId);
       });
@@ -154,7 +145,6 @@ async function iniciarServidor(){
         io.to(roomId).emit("showRanking", ranking);
       }
 
-      // 💾 GUARDAR
       socket.on("saveRoom", async (data)=>{
 
         const { roomId, nombre, password } = data;
@@ -185,7 +175,6 @@ async function iniciarServidor(){
         socket.emit("roomSaved","💾 Sala guardada permanentemente");
       });
 
-      // 📂 CARGAR
       socket.on("loadRoom", async (data)=>{
 
         const { nombre, password } = data;
@@ -216,9 +205,7 @@ async function iniciarServidor(){
         socket.emit("roomLoaded", roomId);
       });
 
-      // 📋 LISTA
       socket.on("getRooms", async ()=>{
-
         const salas = await db.collection("salas")
           .find({}, { projection: { nombre: 1, _id: 0 } })
           .toArray();
@@ -229,14 +216,12 @@ async function iniciarServidor(){
     });
 
     const PORT = process.env.PORT || 3000;
-    server.listen(PORT, ()=>{
-      console.log("🚀 Servidor listo");
-    });
+    server.listen(PORT, ()=> console.log("🚀 Server listo"));
 
   }catch(e){
-    console.log("❌ ERROR CRÍTICO MONGO:", e);
+    console.log("❌ Error Mongo:", e);
   }
 
 }
 
-iniciarServidor();
+iniciar();
