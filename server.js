@@ -47,29 +47,30 @@ io.on("connection", (socket) => {
 
     socket.join(roomId);
 
-    // 🔥 Nombre por defecto si viene vacío
+    // 🔥 Nombre seguro
     if (!name) {
       name = "Jugador_" + Math.floor(Math.random()*1000);
     }
 
-    // 🔥 GUARDAR EN EL SOCKET (CLAVE)
     socket.data.name = name;
     socket.data.roomId = roomId;
 
-    // 🔥 Evitar duplicados
-    room.players = room.players.filter(p => p.id !== socket.id);
+    // 🔥 evitar duplicados por nombre
+    room.players = room.players.filter(p => p.name !== name);
 
     if (name !== "Pantalla") {
 
       room.players.push({
-        id: socket.id,
         name: name
       });
 
-      room.scores[socket.id] = {
-        name: name,
-        points: 0
-      };
+      // 🔥 CLAVE: usar nombre como ID
+      if (!room.scores[name]) {
+        room.scores[name] = {
+          name: name,
+          points: 0
+        };
+      }
     }
 
     socket.emit("joinedRoom", roomId);
@@ -120,17 +121,14 @@ io.on("connection", (socket) => {
     const q = room.questions[room.currentQuestion];
     const tiempoRestante = Math.floor((room.endTime - now) / 1000);
 
-    // 🔥 USAR nombre del socket SIEMPRE
-    const name = socket.data.name || "Jugador";
+    const name = socket.data.name;
 
-    if (!room.scores[socket.id]) {
-      room.scores[socket.id] = { name, points: 0 };
-    }
+    if (!name || !room.scores[name]) return;
 
     if (data.answer === q.correcta) {
-      room.scores[socket.id].points += 5 + (tiempoRestante * 2);
+      room.scores[name].points += 5 + (tiempoRestante * 2);
     } else {
-      room.scores[socket.id].points += 2;
+      room.scores[name].points += 2;
     }
   });
 
@@ -147,15 +145,12 @@ io.on("connection", (socket) => {
     if (!room) return;
 
     const ranking = Object.values(room.scores)
-      .map(p => ({
-        name: p.name || "Jugador",
-        points: p.points
-      }))
       .sort((a, b) => b.points - a.points);
 
     io.to(roomId).emit("showRanking", ranking);
   }
 
 });
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT);
