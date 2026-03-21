@@ -47,24 +47,25 @@ io.on("connection", (socket) => {
 
     socket.join(roomId);
 
-    // 🔥 Nombre seguro
     if (!name) {
       name = "Jugador_" + Math.floor(Math.random()*1000);
     }
 
     socket.data.name = name;
-    socket.data.roomId = roomId;
 
-    // 🔥 evitar duplicados por nombre
-    room.players = room.players.filter(p => p.name !== name);
+    // 🔥 LIMPIAR cualquier basura previa
+    room.players = room.players.filter(p => p.id !== socket.id);
 
     if (name !== "Pantalla") {
 
-      room.players.push({
+      const player = {
+        id: socket.id,
         name: name
-      });
+      };
 
-      // 🔥 CLAVE: usar nombre como ID
+      room.players.push(player);
+
+      // 🔥 SCORE con nombre correcto
       if (!room.scores[name]) {
         room.scores[name] = {
           name: name,
@@ -122,7 +123,6 @@ io.on("connection", (socket) => {
     const tiempoRestante = Math.floor((room.endTime - now) / 1000);
 
     const name = socket.data.name;
-
     if (!name || !room.scores[name]) return;
 
     if (data.answer === q.correcta) {
