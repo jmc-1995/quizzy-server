@@ -1,14 +1,15 @@
 {
   "name": "quizzy-server",
   "version": "1.0.0",
+  "description": "Servidor Quizzy",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "socket.io": "^4.7.2",
-    "cors": "^2.8.5"
+    "socket.io": "^4.5.4",
+    "cors": "^2.8.5",
     "mongodb": "^6.3.0"
   }
 }
