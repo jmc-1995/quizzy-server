@@ -47,16 +47,19 @@ io.on("connection", (socket) => {
 
     socket.join(roomId);
 
-    // 🔥 FIX nombre vacío
     if (!name) {
       name = "Jugador_" + Math.floor(Math.random()*1000);
     }
+
+    // 🔥 Guardar SIEMPRE nombre correctamente
+    room.players = room.players.filter(p => p.id !== socket.id);
 
     if (name !== "Pantalla") {
       room.players.push({ id: socket.id, name });
 
       room.scores[socket.id] = {
-        name,
+        id: socket.id,
+        name: name,
         points: 0
       };
     }
@@ -129,6 +132,10 @@ io.on("connection", (socket) => {
     room.active = false;
 
     const ranking = Object.values(room.scores)
+      .map(p => ({
+        name: p.name,
+        points: p.points
+      }))
       .sort((a, b) => b.points - a.points);
 
     io.to(roomId).emit("showRanking", ranking);
