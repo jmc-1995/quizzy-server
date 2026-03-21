@@ -24,7 +24,7 @@ io.on("connection", (socket) => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
     rooms[roomId] = {
-      players: [],
+      players: {},   // 🔥 ahora es objeto por nombre
       questions: [],
       currentQuestion: -1,
       scores: {},
@@ -45,37 +45,37 @@ io.on("connection", (socket) => {
     const room = rooms[roomId];
     if (!room) return;
 
-    socket.join(roomId);
-
     if (!name) {
       name = "Jugador_" + Math.floor(Math.random()*1000);
     }
 
+    socket.join(roomId);
+
     socket.data.name = name;
+    socket.data.roomId = roomId;
 
-    // 🔥 LIMPIEZA TOTAL
-    room.players = room.players.filter(p => p.id !== socket.id);
-
+    // 🔥 CLAVE: guardar por nombre (NO socket.id)
     if (name !== "Pantalla") {
 
-      const player = {
-        id: socket.id,
+      room.players[name] = {
         name: name
       };
 
-      room.players.push(player);
-
-      // score por nombre
       if (!room.scores[name]) {
-        room.scores[name] = { name, points: 0 };
+        room.scores[name] = {
+          name: name,
+          points: 0
+        };
       }
     }
 
-    // 🔥 DEBUG CLAVE
-    console.log("PLAYERS ACTUALES:", room.players);
+    // 🔥 SIEMPRE enviar limpio
+    const playersArray = Object.values(room.players);
+
+    console.log("PLAYERS LIMPIOS:", playersArray);
 
     socket.emit("joinedRoom", roomId);
-    io.to(roomId).emit("playersUpdate", room.players);
+    io.to(roomId).emit("playersUpdate", playersArray);
   });
 
   socket.on("addQuestion", (data) => {
