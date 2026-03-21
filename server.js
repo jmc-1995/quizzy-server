@@ -6,7 +6,6 @@ const cors = require("cors");
 const app = express();
 app.use(cors());
 
-// Ruta base
 app.get("/", (req, res) => {
   res.send("Quizzy server funcionando ✅");
 });
@@ -14,18 +13,13 @@ app.get("/", (req, res) => {
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: {
-    origin: "*"
-  }
+  cors: { origin: "*" }
 });
 
 let rooms = {};
 
 io.on("connection", (socket) => {
 
-  console.log("Cliente conectado:", socket.id);
-
-  // Crear sala
   socket.on("createRoom", () => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -33,72 +27,47 @@ io.on("connection", (socket) => {
       players: [],
       questions: [],
       currentQuestion: -1,
-      scores: {}
+      scores: {},
+      active: false
     };
 
     socket.join(roomId);
     socket.emit("roomCreated", roomId);
   });
 
-  // Unirse a sala
   socket.on("joinRoom", (data) => {
-
-    if (!data || !data.roomId) return;
-
     const roomId = data.roomId.trim();
-    const name = data.name || "Anon";
+    const name = data.name;
 
     const room = rooms[roomId];
-
-    if (!room) {
-      socket.emit("errorMessage", "Sala no existe");
-      return;
-    }
+    if (!room) return;
 
     socket.join(roomId);
 
-    // NO agregar pantalla
     if (name !== "Pantalla") {
-      room.players.push({
-        id: socket.id,
-        name: name
-      });
-
-      room.scores[socket.id] = {
-        name: name,
-        points: 0
-      };
+      room.players.push({ id: socket.id, name });
+      room.scores[socket.id] = { name, points: 0 };
     }
 
-    io.to(roomId).emit("playersUpdate", room.players);
     socket.emit("joinedRoom", roomId);
+    io.to(roomId).emit("playersUpdate", room.players);
   });
 
-  // Agregar pregunta
   socket.on("addQuestion", (data) => {
-
-    if (!data || !data.roomId || !data.question) return;
-
     const room = rooms[data.roomId.trim()];
     if (!room) return;
 
     room.questions.push(data.question);
-
     socket.emit("questionAdded", room.questions.length);
   });
 
-  // Siguiente pregunta
   socket.on("nextQuestion", (roomId) => {
-
-    if (!roomId) return;
-
     const room = rooms[roomId.trim()];
     if (!room) return;
 
     room.currentQuestion++;
 
     if (room.currentQuestion >= room.questions.length) {
-
       const ranking = Object.values(room.scores)
         .sort((a, b) => b.points - a.points);
 
@@ -108,41 +77,45 @@ io.on("connection", (socket) => {
 
     const q = room.questions[room.currentQuestion];
 
-    // Mezclar opciones
+    room.active = true;
+    room.endTime = Date.now() + q.tiempo;
+
     const opciones = [...q.opciones].sort(() => Math.random() - 0.5);
 
     io.to(roomId).emit("newQuestion", {
       pregunta: q.pregunta,
-      opciones: opciones,
+      opciones,
       correcta: q.correcta,
       tiempo: q.tiempo
     });
   });
 
-  // Respuesta
   socket.on("answer", (data) => {
-
-    if (!data || !data.roomId) return;
-
     const room = rooms[data.roomId.trim()];
-    if (!room) return;
+    if (!room || !room.active) return;
+
+    const now = Date.now();
+
+    // ❌ No aceptar fuera de tiempo
+    if (now > room.endTime) return;
 
     const q = room.questions[room.currentQuestion];
+    const tiempoRestante = Math.floor((room.endTime - now) / 1000);
 
-    if (q && data.answer === q.correcta) {
-      const puntos = Math.max(0, 1000 - (data.time * 50));
+    if (!room.scores[socket.id]) return;
 
-      room.scores[socket.id].points += puntos;
+    if (data.answer === q.correcta) {
+      room.scores[socket.id].points += 5 + (tiempoRestante * 2);
+    } else {
+      room.scores[socket.id].points += 2;
     }
   });
 
-  // Mostrar ranking
   socket.on("showResults", (roomId) => {
-
-    if (!roomId) return;
-
     const room = rooms[roomId.trim()];
     if (!room) return;
+
+    room.active = false;
 
     const ranking = Object.values(room.scores)
       .sort((a, b) => b.points - a.points);
@@ -150,14 +123,7 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("showRanking", ranking);
   });
 
-  socket.on("disconnect", () => {
-    console.log("Cliente desconectado:", socket.id);
-  });
-
 });
 
 const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, () => {
-  console.log("Servidor corriendo en puerto", PORT);
-});
+server.listen(PORT);
