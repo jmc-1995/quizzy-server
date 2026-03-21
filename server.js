@@ -36,17 +36,29 @@ io.on("connection", (socket) => {
   });
 
   socket.on("joinRoom", (data) => {
+
+    if (!data || !data.roomId) return;
+
     const roomId = data.roomId.trim();
-    const name = data.name;
+    let name = (data.name || "").trim();
 
     const room = rooms[roomId];
     if (!room) return;
 
     socket.join(roomId);
 
+    // 🔥 FIX nombre vacío
+    if (!name) {
+      name = "Jugador_" + Math.floor(Math.random()*1000);
+    }
+
     if (name !== "Pantalla") {
       room.players.push({ id: socket.id, name });
-      room.scores[socket.id] = { name, points: 0 };
+
+      room.scores[socket.id] = {
+        name,
+        points: 0
+      };
     }
 
     socket.emit("joinedRoom", roomId);
@@ -96,7 +108,6 @@ io.on("connection", (socket) => {
 
     const now = Date.now();
 
-    // ❌ No aceptar fuera de tiempo
     if (now > room.endTime) return;
 
     const q = room.questions[room.currentQuestion];
