@@ -17,252 +17,226 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-// 🔥 MONGO
+// 🔥 TU MONGO
 const uri = "mongodb+srv://quizzy:Jhon1995@quizzy.ll9ykix.mongodb.net/?retryWrites=true&w=majority";
 
 const client = new MongoClient(uri);
 
 let db;
-let mongoReady = false;
+let rooms = {};
 
-async function conectarDB(){
+// 🔥 INICIAR TODO SOLO CUANDO MONGO CONECTE
+async function iniciarServidor(){
+
   try{
     await client.connect();
     db = client.db("quizzy");
-    mongoReady = true;
+
     console.log("🔥 MongoDB conectado correctamente");
-  }catch(e){
-    console.log("❌ Error Mongo:", e);
-  }
-}
-conectarDB();
 
-let rooms = {};
+    io.on("connection", (socket) => {
 
-io.on("connection", (socket) => {
+      // 🎮 CREAR SALA
+      socket.on("createRoom", () => {
 
-  // 🎮 CREAR SALA
-  socket.on("createRoom", () => {
+        const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
-    const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+        rooms[roomId] = {
+          players: {},
+          questions: [],
+          currentQuestion: -1,
+          scores: {},
+          active: false
+        };
 
-    rooms[roomId] = {
-      players: {},
-      questions: [],
-      currentQuestion: -1,
-      scores: {},
-      active: false
-    };
+        socket.join(roomId);
+        socket.emit("roomCreated", roomId);
+      });
 
-    socket.join(roomId);
-    socket.emit("roomCreated", roomId);
-  });
+      // 👤 UNIRSE
+      socket.on("joinRoom", (data) => {
 
-  // 👤 UNIRSE
-  socket.on("joinRoom", (data) => {
+        const roomId = data.roomId.trim();
+        let name = (data.name || "").trim();
 
-    const roomId = data.roomId.trim();
-    let name = (data.name || "").trim();
+        const room = rooms[roomId];
+        if (!room) return;
 
-    const room = rooms[roomId];
-    if (!room) return;
+        if (!name) name = "Jugador_" + Math.floor(Math.random()*1000);
 
-    if (!name) name = "Jugador_" + Math.floor(Math.random()*1000);
+        socket.join(roomId);
+        socket.data.name = name;
 
-    socket.join(roomId);
-    socket.data.name = name;
+        if (name !== "Pantalla") {
+          room.players[name] = { name };
 
-    if (name !== "Pantalla") {
-      room.players[name] = { name };
-
-      if (!room.scores[name]) {
-        room.scores[name] = { name, points: 0 };
-      }
-    }
-
-    io.to(roomId).emit("playersUpdate", Object.values(room.players));
-    socket.emit("joinedRoom", roomId);
-  });
-
-  // ➕ AGREGAR PREGUNTA
-  socket.on("addQuestion", (data) => {
-
-    const room = rooms[data.roomId];
-    if (!room) return;
-
-    room.questions.push(data.question);
-    socket.emit("questionAdded", room.questions.length);
-  });
-
-  // ➡️ SIGUIENTE
-  socket.on("nextQuestion", (roomId) => {
-
-    const room = rooms[roomId];
-    if (!room) return;
-
-    room.currentQuestion++;
-
-    if (room.currentQuestion >= room.questions.length) {
-      enviarRanking(roomId);
-      return;
-    }
-
-    const q = room.questions[room.currentQuestion];
-
-    room.active = true;
-    room.endTime = Date.now() + q.tiempo;
-
-    const opciones = [...q.opciones].sort(() => Math.random() - 0.5);
-
-    io.to(roomId).emit("newQuestion", {
-      pregunta: q.pregunta,
-      opciones,
-      correcta: q.correcta,
-      tiempo: q.tiempo
-    });
-  });
-
-  // 🎯 RESPUESTA
-  socket.on("answer", (data) => {
-
-    const room = rooms[data.roomId];
-    if (!room || !room.active) return;
-
-    const now = Date.now();
-    if (now > room.endTime) return;
-
-    const q = room.questions[room.currentQuestion];
-    const tiempoRestante = Math.floor((room.endTime - now) / 1000);
-
-    const name = socket.data.name;
-    if (!room.scores[name]) return;
-
-    if (data.answer === q.correcta) {
-      room.scores[name].points += 5 + (tiempoRestante * 2);
-    } else {
-      room.scores[name].points += 2;
-    }
-  });
-
-  // 📊 RESULTADOS
-  socket.on("showResults", (roomId) => {
-    enviarRanking(roomId);
-  });
-
-  function enviarRanking(roomId){
-    const room = rooms[roomId];
-    if (!room) return;
-
-    const ranking = Object.values(room.scores)
-      .sort((a, b) => b.points - a.points);
-
-    io.to(roomId).emit("showRanking", ranking);
-  }
-
-  // 💾 GUARDAR SALA
-  socket.on("saveRoom", async (data)=>{
-
-    if(!mongoReady){
-      socket.emit("roomSaved","❌ Base de datos no lista");
-      return;
-    }
-
-    const { roomId, nombre, password } = data;
-    const room = rooms[roomId];
-
-    if(!room){
-      socket.emit("roomSaved","❌ Sala no existe");
-      return;
-    }
-
-    if(!nombre || !password){
-      socket.emit("roomSaved","❌ Datos incompletos");
-      return;
-    }
-
-    try{
-
-      await db.collection("salas").updateOne(
-        { nombre },
-        {
-          $set:{
-            nombre,
-            password,
-            questions: room.questions
+          if (!room.scores[name]) {
+            room.scores[name] = { name, points: 0 };
           }
-        },
-        { upsert:true }
-      );
+        }
 
-      console.log("💾 Guardado en Mongo:", nombre);
+        io.to(roomId).emit("playersUpdate", Object.values(room.players));
+        socket.emit("joinedRoom", roomId);
+      });
 
-      socket.emit("roomSaved","💾 Sala guardada permanentemente");
+      // ➕ AGREGAR PREGUNTA
+      socket.on("addQuestion", (data) => {
 
-    }catch(e){
-      console.log("❌ Error guardando:", e);
-      socket.emit("roomSaved","❌ Error al guardar");
-    }
-  });
+        const room = rooms[data.roomId];
+        if (!room) return;
 
-  // 📂 CARGAR SALA
-  socket.on("loadRoom", async (data)=>{
+        room.questions.push(data.question);
+        socket.emit("questionAdded", room.questions.length);
+      });
 
-    if(!mongoReady){
-      socket.emit("errorLoad","❌ DB no lista");
-      return;
-    }
+      // ➡️ SIGUIENTE
+      socket.on("nextQuestion", (roomId) => {
 
-    const { nombre, password } = data;
+        const room = rooms[roomId];
+        if (!room) return;
 
-    try{
+        room.currentQuestion++;
 
-      const sala = await db.collection("salas").findOne({ nombre });
+        if (room.currentQuestion >= room.questions.length) {
+          enviarRanking(roomId);
+          return;
+        }
 
-      if(!sala){
-        socket.emit("errorLoad","❌ Sala no existe");
-        return;
+        const q = room.questions[room.currentQuestion];
+
+        room.active = true;
+        room.endTime = Date.now() + q.tiempo;
+
+        const opciones = [...q.opciones].sort(() => Math.random() - 0.5);
+
+        io.to(roomId).emit("newQuestion", {
+          pregunta: q.pregunta,
+          opciones,
+          correcta: q.correcta,
+          tiempo: q.tiempo
+        });
+      });
+
+      // 🎯 RESPUESTA
+      socket.on("answer", (data) => {
+
+        const room = rooms[data.roomId];
+        if (!room || !room.active) return;
+
+        const now = Date.now();
+        if (now > room.endTime) return;
+
+        const q = room.questions[room.currentQuestion];
+        const tiempoRestante = Math.floor((room.endTime - now) / 1000);
+
+        const name = socket.data.name;
+        if (!room.scores[name]) return;
+
+        if (data.answer === q.correcta) {
+          room.scores[name].points += 5 + (tiempoRestante * 2);
+        } else {
+          room.scores[name].points += 2;
+        }
+      });
+
+      // 📊 RESULTADOS
+      socket.on("showResults", (roomId) => {
+        enviarRanking(roomId);
+      });
+
+      function enviarRanking(roomId){
+        const room = rooms[roomId];
+        if (!room) return;
+
+        const ranking = Object.values(room.scores)
+          .sort((a, b) => b.points - a.points);
+
+        io.to(roomId).emit("showRanking", ranking);
       }
 
-      if(sala.password !== password){
-        socket.emit("errorLoad","❌ Contraseña incorrecta");
-        return;
-      }
+      // 💾 GUARDAR
+      socket.on("saveRoom", async (data)=>{
 
-      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+        const { roomId, nombre, password } = data;
+        const room = rooms[roomId];
 
-      rooms[roomId] = {
-        players: {},
-        questions: sala.questions,
-        currentQuestion: -1,
-        scores: {},
-        active: false
-      };
+        if(!room){
+          socket.emit("roomSaved","❌ Sala no existe");
+          return;
+        }
 
-      socket.join(roomId);
+        if(!nombre || !password){
+          socket.emit("roomSaved","❌ Datos incompletos");
+          return;
+        }
 
-      socket.emit("roomLoaded", roomId);
+        await db.collection("salas").updateOne(
+          { nombre },
+          {
+            $set:{
+              nombre,
+              password,
+              questions: room.questions
+            }
+          },
+          { upsert:true }
+        );
 
-    }catch(e){
-      socket.emit("errorLoad","❌ Error al cargar");
-    }
-  });
+        socket.emit("roomSaved","💾 Sala guardada permanentemente");
+      });
 
-  // 📋 LISTAR SALAS
-  socket.on("getRooms", async ()=>{
+      // 📂 CARGAR
+      socket.on("loadRoom", async (data)=>{
 
-    if(!mongoReady){
-      socket.emit("roomsList", []);
-      return;
-    }
+        const { nombre, password } = data;
 
-    const salas = await db.collection("salas")
-      .find({}, { projection: { nombre: 1, _id: 0 } })
-      .toArray();
+        const sala = await db.collection("salas").findOne({ nombre });
 
-    socket.emit("roomsList", salas);
-  });
+        if(!sala){
+          socket.emit("errorLoad","❌ Sala no existe");
+          return;
+        }
 
-});
+        if(sala.password !== password){
+          socket.emit("errorLoad","❌ Contraseña incorrecta");
+          return;
+        }
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT);
+        const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+
+        rooms[roomId] = {
+          players: {},
+          questions: sala.questions,
+          currentQuestion: -1,
+          scores: {},
+          active: false
+        };
+
+        socket.join(roomId);
+        socket.emit("roomLoaded", roomId);
+      });
+
+      // 📋 LISTA
+      socket.on("getRooms", async ()=>{
+
+        const salas = await db.collection("salas")
+          .find({}, { projection: { nombre: 1, _id: 0 } })
+          .toArray();
+
+        socket.emit("roomsList", salas);
+      });
+
+    });
+
+    const PORT = process.env.PORT || 3000;
+    server.listen(PORT, ()=>{
+      console.log("🚀 Servidor listo");
+    });
+
+  }catch(e){
+    console.log("❌ ERROR CRÍTICO MONGO:", e);
+  }
+
+}
+
+iniciarServidor();
