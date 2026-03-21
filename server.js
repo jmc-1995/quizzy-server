@@ -2,7 +2,6 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const fs = require("fs");
 
 const app = express();
 app.use(cors());
@@ -18,23 +17,11 @@ const io = new Server(server, {
 });
 
 let rooms = {};
-
-// 🔥 ARCHIVO JSON
-function cargarSalas(){
-  try{
-    return JSON.parse(fs.readFileSync("salas.json"));
-  }catch{
-    return {};
-  }
-}
-
-function guardarSalas(data){
-  fs.writeFileSync("salas.json", JSON.stringify(data,null,2));
-}
+let savedRooms = {}; // 🔥 almacenamiento temporal
 
 io.on("connection", (socket) => {
 
-  // CREAR SALA
+  // 🔥 CREAR SALA
   socket.on("createRoom", () => {
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -50,7 +37,7 @@ io.on("connection", (socket) => {
     socket.emit("roomCreated", roomId);
   });
 
-  // UNIRSE
+  // 🔥 UNIRSE
   socket.on("joinRoom", (data) => {
 
     const roomId = data.roomId.trim();
@@ -76,16 +63,17 @@ io.on("connection", (socket) => {
     socket.emit("joinedRoom", roomId);
   });
 
-  // AGREGAR PREGUNTA
+  // 🔥 AGREGAR PREGUNTA
   socket.on("addQuestion", (data) => {
     const room = rooms[data.roomId];
     if (!room) return;
 
     room.questions.push(data.question);
+
     socket.emit("questionAdded", room.questions.length);
   });
 
-  // SIGUIENTE PREGUNTA
+  // 🔥 SIGUIENTE
   socket.on("nextQuestion", (roomId) => {
     const room = rooms[roomId];
     if (!room) return;
@@ -112,7 +100,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  // RESPUESTA
+  // 🔥 RESPUESTA
   socket.on("answer", (data) => {
     const room = rooms[data.roomId];
     if (!room || !room.active) return;
@@ -133,7 +121,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // MOSTRAR RESULTADOS
+  // 🔥 RESULTADOS
   socket.on("showResults", (roomId) => {
     enviarRanking(roomId);
   });
@@ -153,27 +141,31 @@ io.on("connection", (socket) => {
 
     const { roomId, nombre, password } = data;
     const room = rooms[roomId];
-    if(!room) return;
 
-    let db = cargarSalas();
+    if(!room){
+      socket.emit("roomSaved","❌ Sala no existe");
+      return;
+    }
 
-    db[nombre] = {
+    if(!nombre || !password){
+      socket.emit("roomSaved","❌ Nombre o contraseña vacíos");
+      return;
+    }
+
+    savedRooms[nombre] = {
       password,
       questions: room.questions
     };
 
-    guardarSalas(db);
-
-    socket.emit("roomSaved","✅ Sala guardada");
+    socket.emit("roomSaved","✅ Sala guardada correctamente");
   });
 
   // 📂 CARGAR SALA
   socket.on("loadRoom",(data)=>{
 
     const { nombre, password } = data;
-    let db = cargarSalas();
 
-    const sala = db[nombre];
+    const sala = savedRooms[nombre];
 
     if(!sala){
       socket.emit("errorLoad","❌ No existe");
@@ -196,6 +188,7 @@ io.on("connection", (socket) => {
     };
 
     socket.join(roomId);
+
     socket.emit("roomLoaded", roomId);
   });
 
