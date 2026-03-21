@@ -53,7 +53,7 @@ io.on("connection", (socket) => {
 
     socket.data.name = name;
 
-    // 🔥 LIMPIAR cualquier basura previa
+    // 🔥 LIMPIEZA TOTAL
     room.players = room.players.filter(p => p.id !== socket.id);
 
     if (name !== "Pantalla") {
@@ -65,14 +65,14 @@ io.on("connection", (socket) => {
 
       room.players.push(player);
 
-      // 🔥 SCORE con nombre correcto
+      // score por nombre
       if (!room.scores[name]) {
-        room.scores[name] = {
-          name: name,
-          points: 0
-        };
+        room.scores[name] = { name, points: 0 };
       }
     }
+
+    // 🔥 DEBUG CLAVE
+    console.log("PLAYERS ACTUALES:", room.players);
 
     socket.emit("joinedRoom", roomId);
     io.to(roomId).emit("playersUpdate", room.players);
