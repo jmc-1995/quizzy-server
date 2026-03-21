@@ -17,28 +17,30 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-// 🔥 MONGO (SEGURO)
+// 🔥 MONGO (NO BLOQUEANTE)
 const uri = "mongodb+srv://quizzy:Jhon1995@quizzy.ll9ykix.mongodb.net/quizzy?retryWrites=true&w=majority";
 
 let db = null;
 
-// 🔥 CONEXIÓN SIN CRASH
-async function conectarMongo(){
-  try{
-    const client = new MongoClient(uri);
-    await client.connect();
+const client = new MongoClient(uri, {
+  serverSelectionTimeoutMS: 5000
+});
+
+client.connect()
+  .then(() => {
     db = client.db("quizzy");
     console.log("🔥 Mongo conectado");
-  }catch(e){
-    console.log("⚠️ Mongo NO conectado (pero servidor sigue funcionando)");
-  }
-}
-conectarMongo();
+  })
+  .catch(err => {
+    console.log("⚠️ Mongo no responde:", err.message);
+  });
 
+// 🎮 MEMORIA
 let rooms = {};
 
 io.on("connection", (socket) => {
 
+  // 🎮 CREAR SALA
   socket.on("createRoom", () => {
 
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -55,17 +57,19 @@ io.on("connection", (socket) => {
     socket.emit("roomCreated", roomId);
   });
 
+  // 👤 UNIRSE
   socket.on("joinRoom", (data) => {
 
     const room = rooms[data.roomId];
     if (!room) return;
 
-    let name = data.name || "Jugador_" + Math.floor(Math.random()*1000);
+    let name = (data.name || "").trim();
+    if (!name) name = "Jugador_" + Math.floor(Math.random()*1000);
 
     socket.join(data.roomId);
     socket.data.name = name;
 
-    if(name !== "Pantalla"){
+    if (name !== "Pantalla") {
       room.players[name] = { name };
 
       if (!room.scores[name]) {
@@ -77,14 +81,18 @@ io.on("connection", (socket) => {
     socket.emit("joinedRoom", data.roomId);
   });
 
+  // ➕ AGREGAR PREGUNTA
   socket.on("addQuestion", (data) => {
+
     const room = rooms[data.roomId];
     if (!room) return;
 
     room.questions.push(data.question);
+
     socket.emit("questionAdded", room.questions.length);
   });
 
+  // ➡️ SIGUIENTE PREGUNTA
   socket.on("nextQuestion", (roomId) => {
 
     const room = rooms[roomId];
@@ -112,6 +120,7 @@ io.on("connection", (socket) => {
     });
   });
 
+  // 🎯 RESPUESTA
   socket.on("answer", (data) => {
 
     const room = rooms[data.roomId];
@@ -124,7 +133,6 @@ io.on("connection", (socket) => {
     const tiempoRestante = Math.floor((room.endTime - now) / 1000);
 
     const name = socket.data.name;
-
     if (!room.scores[name]) return;
 
     if (data.answer === q.correcta) {
@@ -134,11 +142,13 @@ io.on("connection", (socket) => {
     }
   });
 
+  // 📊 MOSTRAR RESULTADOS
   socket.on("showResults", (roomId) => {
     enviarRanking(roomId);
   });
 
   function enviarRanking(roomId){
+
     const room = rooms[roomId];
     if (!room) return;
 
@@ -148,7 +158,7 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("showRanking", ranking);
   }
 
-  // 💾 GUARDAR (SOLO SI MONGO EXISTE)
+  // 💾 GUARDAR SALA
   socket.on("saveRoom", async (data)=>{
 
     if(!db){
@@ -163,21 +173,32 @@ io.on("connection", (socket) => {
       return;
     }
 
-    await db.collection("salas").updateOne(
-      { nombre: data.nombre },
-      {
-        $set:{
-          nombre: data.nombre,
-          password: data.password,
-          questions: room.questions
-        }
-      },
-      { upsert:true }
-    );
+    if(!data.nombre || !data.password){
+      socket.emit("roomSaved","❌ Datos incompletos");
+      return;
+    }
 
-    socket.emit("roomSaved","💾 Sala guardada");
+    try{
+      await db.collection("salas").updateOne(
+        { nombre: data.nombre },
+        {
+          $set:{
+            nombre: data.nombre,
+            password: data.password,
+            questions: room.questions
+          }
+        },
+        { upsert:true }
+      );
+
+      socket.emit("roomSaved","💾 Sala guardada");
+
+    }catch(e){
+      socket.emit("roomSaved","❌ Error al guardar");
+    }
   });
 
+  // 📂 CARGAR SALA
   socket.on("loadRoom", async (data)=>{
 
     if(!db){
@@ -185,32 +206,40 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const sala = await db.collection("salas").findOne({ nombre: data.nombre });
+    try{
 
-    if(!sala){
-      socket.emit("errorLoad","❌ No existe");
-      return;
+      const sala = await db.collection("salas").findOne({ nombre: data.nombre });
+
+      if(!sala){
+        socket.emit("errorLoad","❌ Sala no existe");
+        return;
+      }
+
+      if(sala.password !== data.password){
+        socket.emit("errorLoad","❌ Contraseña incorrecta");
+        return;
+      }
+
+      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+
+      rooms[roomId] = {
+        players: {},
+        questions: sala.questions,
+        currentQuestion: -1,
+        scores: {},
+        active: false
+      };
+
+      socket.join(roomId);
+
+      socket.emit("roomLoaded", roomId);
+
+    }catch(e){
+      socket.emit("errorLoad","❌ Error al cargar");
     }
-
-    if(sala.password !== data.password){
-      socket.emit("errorLoad","❌ Contraseña incorrecta");
-      return;
-    }
-
-    const roomId = Math.floor(1000 + Math.random() * 9000).toString();
-
-    rooms[roomId] = {
-      players: {},
-      questions: sala.questions,
-      currentQuestion: -1,
-      scores: {},
-      active: false
-    };
-
-    socket.join(roomId);
-    socket.emit("roomLoaded", roomId);
   });
 
+  // 📋 LISTAR SALAS
   socket.on("getRooms", async ()=>{
 
     if(!db){
@@ -218,14 +247,22 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const salas = await db.collection("salas")
-      .find({}, { projection: { nombre: 1, _id: 0 } })
-      .toArray();
+    try{
+      const salas = await db.collection("salas")
+        .find({}, { projection: { nombre: 1, _id: 0 } })
+        .toArray();
 
-    socket.emit("roomsList", salas);
+      socket.emit("roomsList", salas);
+
+    }catch(e){
+      socket.emit("roomsList",[]);
+    }
   });
 
 });
 
+// 🚀 ARRANQUE INMEDIATO
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, ()=>console.log("🚀 Servidor corriendo"));
+server.listen(PORT, () => {
+  console.log("🚀 Servidor corriendo");
+});
