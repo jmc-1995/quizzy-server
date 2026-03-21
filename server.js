@@ -47,18 +47,26 @@ io.on("connection", (socket) => {
 
     socket.join(roomId);
 
+    // 🔥 Nombre por defecto si viene vacío
     if (!name) {
       name = "Jugador_" + Math.floor(Math.random()*1000);
     }
 
-    // 🔥 Guardar SIEMPRE nombre correctamente
+    // 🔥 GUARDAR EN EL SOCKET (CLAVE)
+    socket.data.name = name;
+    socket.data.roomId = roomId;
+
+    // 🔥 Evitar duplicados
     room.players = room.players.filter(p => p.id !== socket.id);
 
     if (name !== "Pantalla") {
-      room.players.push({ id: socket.id, name });
+
+      room.players.push({
+        id: socket.id,
+        name: name
+      });
 
       room.scores[socket.id] = {
-        id: socket.id,
         name: name,
         points: 0
       };
@@ -83,10 +91,7 @@ io.on("connection", (socket) => {
     room.currentQuestion++;
 
     if (room.currentQuestion >= room.questions.length) {
-      const ranking = Object.values(room.scores)
-        .sort((a, b) => b.points - a.points);
-
-      io.to(roomId).emit("gameOver", ranking);
+      enviarRanking(roomId);
       return;
     }
 
@@ -110,13 +115,17 @@ io.on("connection", (socket) => {
     if (!room || !room.active) return;
 
     const now = Date.now();
-
     if (now > room.endTime) return;
 
     const q = room.questions[room.currentQuestion];
     const tiempoRestante = Math.floor((room.endTime - now) / 1000);
 
-    if (!room.scores[socket.id]) return;
+    // 🔥 USAR nombre del socket SIEMPRE
+    const name = socket.data.name || "Jugador";
+
+    if (!room.scores[socket.id]) {
+      room.scores[socket.id] = { name, points: 0 };
+    }
 
     if (data.answer === q.correcta) {
       room.scores[socket.id].points += 5 + (tiempoRestante * 2);
@@ -130,18 +139,23 @@ io.on("connection", (socket) => {
     if (!room) return;
 
     room.active = false;
+    enviarRanking(roomId);
+  });
+
+  function enviarRanking(roomId){
+    const room = rooms[roomId];
+    if (!room) return;
 
     const ranking = Object.values(room.scores)
       .map(p => ({
-        name: p.name,
+        name: p.name || "Jugador",
         points: p.points
       }))
       .sort((a, b) => b.points - a.points);
 
     io.to(roomId).emit("showRanking", ranking);
-  });
+  }
 
 });
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT);
