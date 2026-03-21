@@ -21,13 +21,16 @@ const io = new Server(server, {
 const uri = "mongodb+srv://quizzy:Jhon1995@quizzy.ll9ykix.mongodb.net/?retryWrites=true&w=majority";
 
 const client = new MongoClient(uri);
+
 let db;
+let mongoReady = false;
 
 async function conectarDB(){
   try{
     await client.connect();
     db = client.db("quizzy");
-    console.log("🔥 MongoDB conectado");
+    mongoReady = true;
+    console.log("🔥 MongoDB conectado correctamente");
   }catch(e){
     console.log("❌ Error Mongo:", e);
   }
@@ -38,7 +41,7 @@ let rooms = {};
 
 io.on("connection", (socket) => {
 
-  // CREAR SALA
+  // 🎮 CREAR SALA
   socket.on("createRoom", () => {
 
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -55,7 +58,7 @@ io.on("connection", (socket) => {
     socket.emit("roomCreated", roomId);
   });
 
-  // UNIRSE
+  // 👤 UNIRSE
   socket.on("joinRoom", (data) => {
 
     const roomId = data.roomId.trim();
@@ -81,8 +84,9 @@ io.on("connection", (socket) => {
     socket.emit("joinedRoom", roomId);
   });
 
-  // AGREGAR PREGUNTA
+  // ➕ AGREGAR PREGUNTA
   socket.on("addQuestion", (data) => {
+
     const room = rooms[data.roomId];
     if (!room) return;
 
@@ -90,7 +94,7 @@ io.on("connection", (socket) => {
     socket.emit("questionAdded", room.questions.length);
   });
 
-  // SIGUIENTE
+  // ➡️ SIGUIENTE
   socket.on("nextQuestion", (roomId) => {
 
     const room = rooms[roomId];
@@ -118,7 +122,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  // RESPUESTA
+  // 🎯 RESPUESTA
   socket.on("answer", (data) => {
 
     const room = rooms[data.roomId];
@@ -140,7 +144,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // RESULTADOS
+  // 📊 RESULTADOS
   socket.on("showResults", (roomId) => {
     enviarRanking(roomId);
   });
@@ -155,8 +159,13 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("showRanking", ranking);
   }
 
-  // GUARDAR
+  // 💾 GUARDAR SALA
   socket.on("saveRoom", async (data)=>{
+
+    if(!mongoReady){
+      socket.emit("roomSaved","❌ Base de datos no lista");
+      return;
+    }
 
     const { roomId, nombre, password } = data;
     const room = rooms[roomId];
@@ -171,54 +180,80 @@ io.on("connection", (socket) => {
       return;
     }
 
-    await db.collection("salas").updateOne(
-      { nombre },
-      {
-        $set:{
-          nombre,
-          password,
-          questions: room.questions
-        }
-      },
-      { upsert:true }
-    );
+    try{
 
-    socket.emit("roomSaved","💾 Sala guardada permanentemente");
+      await db.collection("salas").updateOne(
+        { nombre },
+        {
+          $set:{
+            nombre,
+            password,
+            questions: room.questions
+          }
+        },
+        { upsert:true }
+      );
+
+      console.log("💾 Guardado en Mongo:", nombre);
+
+      socket.emit("roomSaved","💾 Sala guardada permanentemente");
+
+    }catch(e){
+      console.log("❌ Error guardando:", e);
+      socket.emit("roomSaved","❌ Error al guardar");
+    }
   });
 
-  // CARGAR
+  // 📂 CARGAR SALA
   socket.on("loadRoom", async (data)=>{
+
+    if(!mongoReady){
+      socket.emit("errorLoad","❌ DB no lista");
+      return;
+    }
 
     const { nombre, password } = data;
 
-    const sala = await db.collection("salas").findOne({ nombre });
+    try{
 
-    if(!sala){
-      socket.emit("errorLoad","❌ Sala no existe");
-      return;
+      const sala = await db.collection("salas").findOne({ nombre });
+
+      if(!sala){
+        socket.emit("errorLoad","❌ Sala no existe");
+        return;
+      }
+
+      if(sala.password !== password){
+        socket.emit("errorLoad","❌ Contraseña incorrecta");
+        return;
+      }
+
+      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+
+      rooms[roomId] = {
+        players: {},
+        questions: sala.questions,
+        currentQuestion: -1,
+        scores: {},
+        active: false
+      };
+
+      socket.join(roomId);
+
+      socket.emit("roomLoaded", roomId);
+
+    }catch(e){
+      socket.emit("errorLoad","❌ Error al cargar");
     }
-
-    if(sala.password !== password){
-      socket.emit("errorLoad","❌ Contraseña incorrecta");
-      return;
-    }
-
-    const roomId = Math.floor(1000 + Math.random() * 9000).toString();
-
-    rooms[roomId] = {
-      players: {},
-      questions: sala.questions,
-      currentQuestion: -1,
-      scores: {},
-      active: false
-    };
-
-    socket.join(roomId);
-    socket.emit("roomLoaded", roomId);
   });
 
   // 📋 LISTAR SALAS
   socket.on("getRooms", async ()=>{
+
+    if(!mongoReady){
+      socket.emit("roomsList", []);
+      return;
+    }
 
     const salas = await db.collection("salas")
       .find({}, { projection: { nombre: 1, _id: 0 } })
